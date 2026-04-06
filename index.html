@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>나의 시간표</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 커스텀 스크롤바 숨기기 (옵션) */
+        ::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+        }
+        body {
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <!-- 메인 앱 컨테이너 -->
+    <div class="min-h-screen bg-gray-50 text-gray-800 font-sans sm:p-6 p-0 flex justify-center items-center">
+        
+        <!-- 1. 로딩 화면 -->
+        <div id="loading-screen" class="min-h-screen w-full flex flex-col items-center justify-center bg-gray-50 text-indigo-600 gap-3 z-50">
+            <i data-lucide="loader-2" class="animate-spin w-10 h-10"></i>
+            <p class="text-sm font-bold text-gray-500">시간표를 불러오는 중입니다...</p>
+        </div>
+
+        <!-- 2. 메인 앱 화면 (인증 후 보임) -->
+        <div id="app-container" class="hidden w-full max-w-md bg-white sm:rounded-[2.5rem] sm:shadow-2xl sm:border-[10px] border-gray-200 overflow-hidden relative flex flex-col h-[100dvh] sm:h-[850px]">
+            
+            <!-- 2-1. 메인 화면 (시간표) -->
+            <div id="main-screen" class="flex flex-col h-full absolute w-full transition-transform duration-300 ease-in-out translate-x-0">
+                <!-- JS에서 렌더링 -->
+            </div>
+
+            <!-- 2-2. 상세 타임라인 화면 -->
+            <div id="detail-screen" class="absolute top-0 left-0 w-full h-full bg-[#F9FAFB] z-20 transition-transform duration-300 ease-in-out flex flex-col translate-x-full">
+                <!-- JS에서 렌더링 -->
+            </div>
+
+            <!-- 2-3. 설정 화면 -->
+            <div id="settings-screen" class="absolute top-0 left-0 w-full h-full bg-white z-30 transition-transform duration-400 ease-out flex flex-col translate-y-full">
+                <!-- JS에서 렌더링 -->
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 앱 로직 -->
+    <script type="module">
+        // --- 클라우드(Firebase) 초기화 ---
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+        import { getAnalytics } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+        import { getFirestore, doc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDlEThUvDK2Dob5OhQKlAmltG4JMEVrTnk",
+            authDomain: "class-tracker-df692.firebaseapp.com",
+            projectId: "class-tracker-df692",
+            storageBucket: "class-tracker-df692.firebasestorage.app",
+            messagingSenderId: "977674109379",
+            appId: "1:977674109379:web:90e4656696240f4c26bd76",
+            measurementId: "G-01YLH94S61"
+        };
+        const app = initializeApp(firebaseConfig);
+        
+        let analytics;
+        try {
+            analytics = getAnalytics(app);
+        } catch (error) {
+            console.log("Analytics 초기화 건너뜀 (미지원 환경)");
+        }
+
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "class-tracker-df692";
+
+        // --- 상태 관리 ---
+        let user = null;
+        let unsubscribeSnapshot = null;
+
+        const days = ['월', '화', '수', '목', '금'];
+        const periods = [1, 2, 3, 4, 5, 6, 7];
+        
+        let selectedDay = '월';
+        let viewMode = 'main'; 
+        let selectedCell = null;
+        let editingRecordId = null;
+
+        // 초기 기본 데이터
+        let timetable = {
+            '월': { 1: '1학년 1반', 2: '1학년 2반', 4: '1학년 3반', 6: '동아리' },
+            '화': { 2: '1학년 4반', 3: '1학년 1반', 5: '1학년 2반' },
+            '수': { 1: '1학년 3반', 3: '1학년 4반', 4: '1학년 1반', 5: '교직원회의' },
+            '목': { 2: '1학년 2반', 4: '1학년 3반', 6: '1학년 4반' },
+            '금': { 1: '1학년 1반', 3: '1학년 2반', 5: '1학년 3반', 6: '1학년 4반' },
+        };
+
+        let periodTimes = {
+            1: '08:50 ~ 09:35', 2: '09:45 ~ 10:30', 3: '10:40 ~ 11:25', 4: '11:35 ~ 12:20',
+            5: '13:10 ~ 13:55', 6: '14:05 ~ 14:50', 7: '15:00 ~ 15:45',
+        };
+
+        let classRecords = {};
+        let tempTimetable = {};
+        let tempPeriodTimes = {};
+
+        // --- 색상 유틸리티 ---
+        function getClassColor(className) {
+            if (!className) return 'bg-transparent border-transparent';
+            if (className.includes('1반')) return 'bg-blue-100 text-blue-800 border-blue-200';
+            if (className.includes('2반')) return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+            if (className.includes('3반')) return 'bg-violet-100 text-violet-800 border-violet-200';
+            if (className.includes('4반')) return 'bg-orange-100 text-orange-800 border-orange-200';
+            if (className.includes('5반')) return 'bg-pink-100 text-pink-800 border-pink-200';
+            if (className.includes('6반')) return 'bg-cyan-100 text-cyan-800 border-cyan-200';
+            return 'bg-gray-100 text-gray-700 border-gray-300';
+        }
+
+        function refreshIcons() {
+            if (window.lucide) {
+                window.lucide.createIcons();
+            }
+        }
+
+        // --- 자동 익명 인증 ---
+        const initAuth = async () => {
+            try {
+                await signInAnonymously(auth);
+            } catch (error) {
+                console.error("인증 실패", error);
+                document.getElementById('loading-screen').innerHTML = `
+                    <div class="text-center px-4">
+                        <p class="text-red-600 font-bold mb-2">접속 오류</p>
+                        <p class="text-xs text-gray-500">파이어베이스 콘솔에서 '익명 로그인'을 활성화해주세요.</p>
+                    </div>
+                `;
+            }
+        };
+
+        initAuth();
+
+        onAuthStateChanged(auth, (currentUser) => {
+            user = currentUser;
+            if (user) {
+                const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'teacherData', 'state');
+                unsubscribeSnapshot = onSnapshot(docRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        if (data.timetable) timetable = data.timetable;
+                        if (data.periodTimes) periodTimes = data.periodTimes;
+                        if (data.classRecords) classRecords = data.classRecords;
+                    }
+                    document.getElementById('loading-screen').classList.add('hidden');
+                    document.getElementById('app-container').classList.remove('hidden');
+                    document.getElementById('app-container').classList.add('flex');
+                    renderAll();
+                });
+            }
+        });
+
+        window.saveToCloud = async (newTimetable, newPeriodTimes, newClassRecords) => {
+            if (!user) return;
+            const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'teacherData', 'state');
+            try {
+                await setDoc(docRef, {
+                    timetable: newTimetable || timetable,
+                    periodTimes: newPeriodTimes || periodTimes,
+                    classRecords: newClassRecords || classRecords
+                }, { merge: true });
+            } catch (error) {
+                console.error("저장 실패", error);
+            }
+        };
+
+        function updateViewVisibility() {
+            const mainScreen = document.getElementById('main-screen');
+            const detailScreen = document.getElementById('detail-screen');
+            const settingsScreen = document.getElementById('settings-screen');
+
+            mainScreen.className = `flex flex-col h-full absolute w-full transition-transform duration-300 ease-in-out ${viewMode === 'main' ? 'translate-x-0' : '-translate-x-full'}`;
+            detailScreen.className = `absolute top-0 left-0 w-full h-full bg-[#F9FAFB] z-20 transition-transform duration-300 ease-in-out flex flex-col ${viewMode === 'detail' ? 'translate-x-0' : 'translate-x-full'}`;
+            settingsScreen.className = `absolute top-0 left-0 w-full h-full bg-white z-30 transition-transform duration-400 ease-out flex flex-col ${viewMode === 'settings' ? 'translate-y-0' : 'translate-y-full'}`;
+        }
+
+        function renderAll() {
+            if (viewMode === 'main') renderMain();
+            else if (viewMode === 'detail') renderDetail();
+            else if (viewMode === 'settings') renderSettings();
+        }
+
+        window.setDay = (day) => { selectedDay = day; renderMain(); };
+        window.openSettings = () => {
+            tempTimetable = JSON.parse(JSON.stringify(timetable));
+            tempPeriodTimes = JSON.parse(JSON.stringify(periodTimes));
+            viewMode = 'settings';
+            updateViewVisibility();
+            renderSettings();
+        };
+        window.closeSettings = () => { viewMode = 'main'; updateViewVisibility(); renderMain(); };
+        window.saveSettings = () => {
+            timetable = JSON.parse(JSON.stringify(tempTimetable));
+            periodTimes = JSON.parse(JSON.stringify(tempPeriodTimes));
+            window.saveToCloud(timetable, periodTimes, null);
+            viewMode = 'main';
+            updateViewVisibility();
+            renderMain();
+        };
+        window.openDetail = (day, period, className) => {
+            if (!classRecords[className]) { classRecords[className] = []; window.saveToCloud(null, null, classRecords); }
+            selectedCell = { day, period, className };
+            editingRecordId = null;
+            viewMode = 'detail';
+            updateViewVisibility();
+            renderDetail();
+        };
+        window.closeDetail = () => { viewMode = 'main'; updateViewVisibility(); renderMain(); };
+        window.addRecord = () => {
+            const className = selectedCell.className;
+            const today = new Date();
+            const dateString = `${today.getFullYear()}. ${today.getMonth() + 1}. ${today.getDate()}.`;
+            const newRecord = { id: Date.now().toString(), date: dateString, currentProgress: '', nextLesson: '', worksheetGiven: false };
+            classRecords[className] = [newRecord, ...(classRecords[className] || [])];
+            editingRecordId = newRecord.id;
+            window.saveToCloud(null, null, classRecords);
+            renderDetail();
+        };
+        window.setEditing = (id) => { editingRecordId = id; renderDetail(); };
+        window.finishEdit = () => { editingRecordId = null; window.saveToCloud(null, null, classRecords); renderDetail(); };
+        window.deleteRecord = (id) => { if(confirm("삭제하시겠습니까?")) { const className = selectedCell.className; classRecords[className] = classRecords[className].filter(r => r.id !== id); window.saveToCloud(null, null, classRecords); renderDetail(); } };
+        window.updateRecordField = (id, field, value) => { const className = selectedCell.className; const record = classRecords[className].find(r => r.id === id); if(record) record[field] = value; };
+        window.toggleWorksheet = (event, id) => {
+            const className = selectedCell.className;
+            const record = classRecords[className].find(r => r.id === id);
+            if (record) {
+                record.worksheetGiven = !record.worksheetGiven;
+                window.saveToCloud(null, null, classRecords);
+                renderDetail();
+            }
+        };
+
+        window.setSettingsDay = (day) => { selectedDay = day; renderSettings(); };
+        window.updateTempClass = (day, period, value) => { if(!tempTimetable[day]) tempTimetable[day] = {}; tempTimetable[day][period] = value; };
+        window.updateTempPeriod = (period, value) => { tempPeriodTimes[period] = value; };
+
+        function renderMain() {
+            const container = document.getElementById('main-screen');
+            let daysHtml = days.map(day => `<button onclick="window.setDay('${day}')" class="flex-1 py-3 text-sm font-bold rounded-2xl transition-all ${selectedDay === day ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-500'}">${day}</button>`).join('');
+            let periodsHtml = periods.map(period => {
+                const className = timetable[selectedDay]?.[period] || '';
+                const hasClass = className.trim() !== '';
+                const latestRecord = hasClass && classRecords[className] && classRecords[className].length > 0 ? classRecords[className][0] : null;
+                return `<div ${hasClass ? `onclick="window.openDetail('${selectedDay}', ${period}, '${className}')"` : ''} class="flex items-stretch bg-white rounded-3xl overflow-hidden border ${hasClass ? 'border-gray-200 shadow-sm' : 'opacity-60'} mb-3">
+                    <div class="w-20 flex flex-col items-center justify-center py-3 border-r border-gray-100 bg-gray-50">
+                        <span class="text-lg font-black text-gray-800">${period}</span>
+                        <span class="text-[9px] font-semibold text-gray-400 mt-1 text-center">${(periodTimes[period] || '').replace('~', '<br/>')}</span>
+                    </div>
+                    <div class="flex-1 p-4 flex items-center justify-between">
+                        ${hasClass ? `<span class="px-3 py-1.5 rounded-xl text-sm font-bold border ${getClassColor(className)}">${className}</span>` : `<span class="text-gray-300 italic text-sm">- 공강 -</span>`}
+                        ${hasClass ? `<i data-lucide="chevron-right" class="text-gray-400 w-5 h-5"></i>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+
+            container.innerHTML = `
+                <header class="bg-white pt-12 pb-4 px-6 border-b flex justify-between items-end">
+                    <div>
+                        <h1 class="text-2xl font-extrabold text-gray-900 flex items-center gap-2"><i data-lucide="calendar-days" class="text-indigo-600"></i>나의 시간표</h1>
+                    </div>
+                    <button onclick="window.openSettings()" class="p-2 text-gray-400 hover:text-indigo-600"><i data-lucide="settings"></i></button>
+                </header>
+                <div class="flex bg-white px-2 py-2 shadow-sm">${daysHtml}</div>
+                <div class="flex-1 overflow-y-auto bg-gray-50/50 p-4 pb-20">${periodsHtml}</div>
+            `;
+            refreshIcons();
+        }
+
+        function renderDetail() {
+            if (!selectedCell) return;
+            const container = document.getElementById('detail-screen');
+            const records = classRecords[selectedCell.className] || [];
+            let headerColor = getClassColor(selectedCell.className).split(' ')[0].replace('-100', '-500') || 'bg-indigo-500';
+
+            container.innerHTML = `
+                <header class="pt-12 pb-6 px-6 ${headerColor} text-white flex-shrink-0 shadow-sm">
+                    <div class="flex justify-between items-center mb-6">
+                        <button onclick="window.closeDetail()" class="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center"><i data-lucide="chevron-left"></i></button>
+                        <button onclick="window.addRecord()" class="px-4 h-10 bg-white text-gray-900 rounded-full text-sm font-bold">+ 새 기록</button>
+                    </div>
+                    <h2 class="text-3xl font-extrabold tracking-tight">${selectedCell.className}</h2>
+                    <p class="text-white/80 text-xs font-bold mt-1">${selectedCell.day}요일 ${selectedCell.period}교시 (${periodTimes[selectedCell.period]})</p>
+                </header>
+                <div class="flex-1 overflow-y-auto p-6 bg-white">
+                    ${records.length === 0 ? `<div class="text-center py-20 text-gray-400">기록이 없습니다.</div>` : records.map((record) => `
+                        <div class="mb-6 p-5 border border-gray-100 rounded-3xl shadow-sm relative ${editingRecordId === record.id ? 'ring-2 ring-indigo-500' : ''}">
+                            <div class="flex justify-between items-center mb-4">
+                                <span class="text-sm font-bold text-gray-500">${record.date}</span>
+                                <div class="flex gap-2">
+                                    ${editingRecordId === record.id ? `<button onclick="window.finishEdit()" class="text-indigo-600 font-bold text-xs">완료</button>` : `<button onclick="window.setEditing('${record.id}')" class="text-gray-400"><i data-lucide="edit-3" class="w-4 h-4"></i></button>`}
+                                    <button onclick="window.deleteRecord('${record.id}')" class="text-red-300"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                </div>
+                            </div>
+                            <div class="space-y-3">
+                                <div onclick="window.toggleWorksheet(event, '${record.id}')" class="flex justify-between items-center bg-gray-50 p-3 rounded-xl cursor-pointer">
+                                    <span class="text-sm font-bold ${record.worksheetGiven ? 'text-indigo-600' : 'text-gray-400'}">활동지 배부</span>
+                                    <i data-lucide="${record.worksheetGiven ? 'check-circle-2' : 'circle'}" class="${record.worksheetGiven ? 'text-indigo-600' : 'text-gray-300'}"></i>
+                                </div>
+                                <div class="bg-gray-50 p-3 rounded-xl">
+                                    <p class="text-[10px] font-bold text-gray-400 mb-1">진도</p>
+                                    ${editingRecordId === record.id ? `<input type="text" value="${record.currentProgress}" oninput="window.updateRecordField('${record.id}', 'currentProgress', this.value)" class="w-full text-sm font-bold border-b border-indigo-200 outline-none" />` : `<p class="text-sm font-bold text-gray-800">${record.currentProgress || '-'}</p>`}
+                                </div>
+                                <div class="bg-gray-50 p-3 rounded-xl">
+                                    <p class="text-[10px] font-bold text-gray-400 mb-1">다음 수업</p>
+                                    ${editingRecordId === record.id ? `<textarea oninput="window.updateRecordField('${record.id}', 'nextLesson', this.value)" class="w-full text-sm outline-none border-b border-indigo-200 resize-none h-16">${record.nextLesson}</textarea>` : `<p class="text-sm text-gray-700">${record.nextLesson || '-'}</p>`}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                    <div class="h-10"></div>
+                </div>
+            `;
+            refreshIcons();
+        }
+
+        function renderSettings() {
+            const container = document.getElementById('settings-screen');
+            container.innerHTML = `
+                <header class="pt-12 pb-4 px-6 border-b flex justify-between items-center bg-gray-50">
+                    <button onclick="window.closeSettings()"><i data-lucide="x"></i></button>
+                    <h2 class="font-bold">시간표 설정</h2>
+                    <button onclick="window.saveSettings()" class="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold">저장</button>
+                </header>
+                <div class="flex-1 overflow-y-auto p-4 space-y-6">
+                    <section>
+                        <h3 class="text-sm font-bold text-gray-400 mb-3">교시 시간</h3>
+                        <div class="grid grid-cols-2 gap-2">
+                            ${periods.map(p => `<div class="bg-gray-50 p-2 rounded-lg flex border"><span class="w-6 text-xs font-bold">${p}</span><input type="text" value="${tempPeriodTimes[p] || ''}" oninput="window.updateTempPeriod(${p}, this.value)" class="bg-transparent text-xs outline-none flex-1"/></div>`).join('')}
+                        </div>
+                    </section>
+                    <section>
+                        <h3 class="text-sm font-bold text-gray-400 mb-3">수업 배정 (${selectedDay})</h3>
+                        <div class="flex gap-1 mb-4">
+                            ${days.map(d => `<button onclick="window.setSettingsDay('${d}')" class="flex-1 py-1 text-xs font-bold rounded-lg ${selectedDay === d ? 'bg-gray-200 text-indigo-600' : 'text-gray-400'}">${d}</button>`).join('')}
+                        </div>
+                        <div class="space-y-2">
+                            ${periods.map(p => `<div class="flex items-center gap-2"><span class="w-6 font-bold text-gray-300 text-sm">${p}</span><input type="text" value="${tempTimetable[selectedDay]?.[p] || ''}" oninput="window.updateTempClass('${selectedDay}', ${p}, this.value)" class="flex-1 p-2 bg-gray-50 border rounded-xl text-sm font-bold outline-none focus:border-indigo-500" /></div>`).join('')}
+                        </div>
+                    </section>
+                </div>
+            `;
+            refreshIcons();
+        }
+        window.onload = () => refreshIcons();
+    </script>
+</body>
+</html>
