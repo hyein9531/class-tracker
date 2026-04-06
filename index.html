@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <!-- 모바일 화면에 맞게 꽉 차게 표시, 확대/축소 방지 (앱처럼 보이게) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>스마트 학급 진도 관리</title>
+    
+    <!-- PWA 설정 (홈 화면에 추가 시 앱처럼 작동하게 하는 설정) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#4f46e5"> <!-- 헤더 색상 (Indigo-600) -->
+
+    <!-- Tailwind CSS (디자인 프레임워크) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React 및 ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel (브라우저에서 React 코드 번역) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Lucide Icons (아이콘) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Firebase SDK (9 버전 이상 호환 모드) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+
+    <script>
+       // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyDlEThUvDK2Dob5OhQKlAmltG4JMEVrTnk",
+  authDomain: "class-tracker-df692.firebaseapp.com",
+  projectId: "class-tracker-df692",
+  storageBucket: "class-tracker-df692.firebasestorage.app",
+  messagingSenderId: "977674109379",
+  appId: "1:977674109379:web:90e4656696240f4c26bd76",
+  measurementId: "G-01YLH94S61"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+        };
+        
+        // Firebase 초기화
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+    </script>
+</head>
+<body class="bg-gray-50 overflow-hidden">
+    <!-- React 앱이 그려질 빈 공간 -->
+    <div id="root"></div>
+
+    <!-- React 컴포넌트 파일 연결 -->
+    <script type="text/babel" src="./App.jsx"></script>
+</body>
+</html>
